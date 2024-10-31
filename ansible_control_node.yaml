@@ -1,0 +1,257 @@
+Description: "Ansible Control Node"
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+  Environment:
+    Type: String
+    Description: Environment name
+    Default: dev
+  InstanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+  InstanceName:
+    Type: String
+    Description: Name of the EC2 instance
+    Default: EC2 Instance
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI ID
+  ProjectName:
+    Type: String
+    Description: Name of the project
+  Owner:
+    Type: String
+    Description: Owner name
+    Default: sysops
+  VpcCIDR:
+    Type: String
+    Description: CIDR for the VPC
+  PublicSubnetCIDR:
+    Type: String
+    Description: CIDR for the public subnet 1
+  PrivateSubnetCIDR:
+    Type: String
+    Description: CIDR for the private subnet 1
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability Zone
+  BastionInstanceType:
+    Type: String
+    Description: EC2 instance type for the bastion host
+    Default: t2.micro
+  BastionAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI ID for the bastion host
+Resources:
+  DevVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+  DevInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-igw
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+  DevVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DevVPC
+      InternetGatewayId: !Ref DevInternetGateway
+  DevPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevVPC
+      CidrBlock: !Ref PublicSubnetCIDR
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-public-subnet-1
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+  DevPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevVPC
+      CidrBlock: !Ref PrivateSubnetCIDR
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-private-subnet-1
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+  DevPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DevVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-public-route-table
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+  DevPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: DevVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref DevPublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref DevInternetGateway
+  DevPublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevPublicSubnet1
+      RouteTableId: !Ref DevPublicRouteTable
+  DevPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DevVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-private-route-table
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+  DevPrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevPrivateSubnet1
+      RouteTableId: !Ref DevPrivateRouteTable
+  DevNATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref DevPublicSubnet1
+      AllocationId: !GetAtt DevEIP.AllocationId
+  DevEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  DevPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DevPrivateRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref DevNATGateway
+  AnsibleControlNode:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          install_and_run:
+            - install
+            - run
+        install:
+          packages:
+            yum:
+              git: []
+              python3: []
+              python3-pip: []
+              ansible: []
+          commands:
+            01_install_boto3:
+              command: pip3 install boto3
+        run:
+          commands:
+            01_clone_ansible_repo:
+              command: git clone https://github.com/jordanholtdev/aws-sysops-learning.git /home/ec2-user/ansible-repo
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Ref AmiId
+      SubnetId: !Ref DevPrivateSubnet1
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-vpc
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install -y aws-cfn-bootstrap
+          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AnsibleControlNode --configsets install_and_run --region ${AWS::Region}
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AnsibleControlNode --region ${AWS::Region}
+          # Additional logging
+          echo "cfn-init exit code: $?" >> /var/log/cfn-init.log
+          echo "cfn-signal exit code: $?" >> /var/log/cfn-signal.log
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22 and outbound internet access
+      VpcId: !Ref DevVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "22"
+          ToPort: "22"
+          SourceSecurityGroupId: !Ref BastionSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: "0.0.0.0/0"
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22 for Bastion Host
+      VpcId: !Ref DevVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref BastionInstanceType
+      ImageId: !Ref BastionAmiId
+      SubnetId: !Ref DevPublicSubnet1
+      SecurityGroupIds:
+        - !Ref BastionSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-bastion
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+Outputs:
+  InstanceId:
+    Description: Instance ID of the Ansible Control Node
+    Value: !Ref AnsibleControlNode
+    Export:
+      Name: !Sub ${AWS::StackName}-InstanceId
