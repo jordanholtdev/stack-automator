@@ -1,0 +1,83 @@
+Description: "Ansible Control Node"
+Parameters:
+  environment:
+    Type: String
+    Description: Environment name
+    Default: dev
+  instanceType:
+    Type: String
+    Description: EC2 instance type
+    Default: t2.micro
+  amiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI ID
+  subnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID
+  securityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group ID
+  instanceName:
+    Type: String
+    Description: Name of the EC2 instance
+    Default: EC2 Instance
+  projectName:
+    Type: String
+    Description: Name of the project
+
+Resources:
+  AnsibleControlNode:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT5M
+
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          install_and_run:
+            - install
+            - run
+        install:
+          packages:
+            yum:
+              git: []
+              python3: []
+              python3-pip: []
+              boto3: []
+              ansible: []
+        run:
+          commands:
+            01_clone_ansible_repo:
+              command: git clone   
+
+
+    Properties:
+      InstanceType: !Ref instanceType
+      ImageId: !Ref amiId
+      SubnetId: !Ref subnetId
+      SecurityGroupIds:
+        - !Ref securityGroupId
+      Tags:
+        - Key: name
+          Value: !Ref instanceName
+        - Key: environment
+          Value: !Ref environment
+        - Key: project
+          Value: !Ref projectName
+
+    UserData:
+      Fn::Base64: !Sub |
+        #!/bin/bash -xe
+        yum update -y
+        yum install -y aws-cfn-bootstrap
+        # signal the status from cfn-init
+        /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AnsibleControlNode --region ${AWS::Region}
+        /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AnsibleControlNode --configsets install_and_run --region ${AWS::Region}
+
+Outputs: 
+  InstanceId:
+    Description: Instance ID of the Ansible Control Node
+    Value: !Ref AnsibleControlNode
+    Export:
+      Name: !Sub ${AWS::StackName}-InstanceId
