@@ -1,37 +1,124 @@
 Description: "Ansible Control Node"
 Parameters:
-  environment:
+  Environment:
     Type: String
     Description: Environment name
     Default: dev
-  instanceType:
+  InstanceType:
     Type: String
     Description: EC2 instance type
     Default: t2.micro
-  amiId:
+  AmiId:
     Type: AWS::EC2::Image::Id
     Description: AMI ID
-  subnetId:
-    Type: AWS::EC2::Subnet::Id
-    Description: Subnet ID
-  securityGroupId:
-    Type: AWS::EC2::SecurityGroup::Id
-    Description: Security Group ID
-  instanceName:
+  InstanceName:
     Type: String
     Description: Name of the EC2 instance
     Default: EC2 Instance
-  projectName:
+  ProjectName:
     Type: String
     Description: Name of the project
-
+  Owner:
+    Type: String
+    Description: Owner name
+    Default: sysops
+  VpcCIDR:
+    Type: String
+    Description: CIDR for the VPC
+  PublicSubnetCIDR:
+    Type: String
+    Description: CIDR for the public subnet 1
+  PrivateSubnetCIDR:
+    Type: String
+    Description: CIDR for the private subnet 1
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability Zone
 Resources:
+  DevVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+  DevInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${Environment}-igw
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref Project
+        - Key: Environment
+          Value: !Ref Environment
+  DevVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DevVPC
+      InternetGatewayId: !Ref DevInternetGateway
+  DevPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevVPC
+      CidrBlock: !Ref PublicSubnetCIDR
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${Environment}-public-subnet-1
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref Project
+        - Key: Environment
+          Value: !Ref Environment
+  DevPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevVPC
+      CidrBlock: !Ref PrivateSubnetCIDR
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${Environment}-private-subnet-1
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref Project
+        - Key: Environment
+          Value: !Ref Environment
+  DevPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DevVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${Environment}-public-route-table
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref Project
+        - Key: Environment
+          Value: !Ref Environment
+  DevPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: DevVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref DevPublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref DevInternetGateway
+  DevPublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevPublicSubnet1
+      RouteTableId: !Ref DevPublicRouteTable
+
   AnsibleControlNode:
     Type: AWS::EC2::Instance
     CreationPolicy:
       ResourceSignal:
         Timeout: PT5M
-
     Metadata:
       AWS::CloudFormation::Init:
         configSets:
@@ -49,23 +136,22 @@ Resources:
         run:
           commands:
             01_clone_ansible_repo:
-              command: git clone   
-
-
+              command: git clone
     Properties:
-      InstanceType: !Ref instanceType
-      ImageId: !Ref amiId
-      SubnetId: !Ref subnetId
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      SubnetId: !Ref PrivateSubnetCIDR
       SecurityGroupIds:
-        - !Ref securityGroupId
+        - !Ref InstanceSecurityGroup
       Tags:
-        - Key: name
-          Value: !Ref instanceName
-        - Key: environment
-          Value: !Ref environment
-        - Key: project
-          Value: !Ref projectName
-
+        - Key: Name
+          Value: !Sub ${Project}-${Environment}-vpc
+        - Key: Owner
+          Value: !Ref Owner
+        - Key: Project
+          Value: !Ref Project
+        - Key: Environment
+          Value: !Ref Environment
     UserData:
       Fn::Base64: !Sub |
         #!/bin/bash -xe
@@ -75,7 +161,18 @@ Resources:
         /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AnsibleControlNode --region ${AWS::Region}
         /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AnsibleControlNode --configsets install_and_run --region ${AWS::Region}
 
-Outputs: 
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref DevVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+
+Outputs:
   InstanceId:
     Description: Instance ID of the Ansible Control Node
     Value: !Ref AnsibleControlNode
