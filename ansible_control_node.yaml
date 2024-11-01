@@ -277,6 +277,21 @@ Resources:
           FromPort: "22"
           ToPort: "22"
           CidrIp: "0.0.0.0/0"
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access via port 80 and outbound internet access
+      VpcId: !Ref DevVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: "0.0.0.0/0"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: "0.0.0.0/0"
   BastionHost:
     Type: AWS::EC2::Instance
     Properties:
@@ -300,3 +315,15 @@ Outputs:
     Value: !Ref AnsibleControlNode
     Export:
       Name: !Sub ${AWS::StackName}-InstanceId
+  
+  PublicSubnet1Id:
+    Description: Subnet ID of the public subnet 1
+    Value: !Ref DevPublicSubnet1
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicSubnet1Id
+
+  WebServerSecurityGroup:
+    Description: Security Group ID for the Web Server
+    Value: !Ref WebServerSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-WebServerSecurityGroup
