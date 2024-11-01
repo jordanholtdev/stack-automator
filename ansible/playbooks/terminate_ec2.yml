@@ -3,8 +3,18 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Read instance IDs from file
+      become: true
+      slurp:
+        src: /var/ansible/instance_ids.txt
+      register: instance_ids_file
+
+    - name: Set instance IDs fact
+      set_fact:
+        instance_ids: "{{ instance_ids_file.content | b64decode | split('\n') }}"
+
     - name: Terminate EC2 instances
-      ec2:
+      amazon.aws.ec2_instance:
         instance_ids: "{{ instance_ids }}"
         state: absent
         region: "{{ region }}"
