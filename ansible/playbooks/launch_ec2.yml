@@ -19,13 +19,21 @@
       debug:
         msg: "region: {{ region }}"
 
-    - name: Debug security_group
-      debug:
-        msg: "security_group: {{ security_group }}"
+    - name: Get CloudFormation stack outputs
+      amazon.aws.cloudformation_facts:
+        stack_name: MyStack
+      register: cfn_outputs
 
-    - name: Debug subnet_id
+    - name: Capture Security Group and Subnet IDs
+      set_fact:
+        security_group_id: "{{ cfn_outputs.stack_outputs | selectattr('output_key', 'equalto', 'WebServerSecurityGroup') | map(attribute='output_value') | first }}"
+        subnet_id: "{{ cfn_outputs.stack_outputs | selectattr('output_key', 'equalto', 'PublicSubnet1Id') | map(attribute='output_value') | first }}"
+
+    - name: Debug - Show retrieved outputs
       debug:
-        msg: "subnet_id: {{ subnet_id }}"
+      msg: 
+        - "Web server security group ID: {{ security_group_id }}"
+        - "Public Subnet ID: {{ subnet_id }}"
 
     - name: Launch a new EC2 instance
       amazon.aws.ec2_instance:
@@ -35,7 +43,7 @@
         image_id: "{{ ami_id }}"
         wait: yes
         region: "{{ region }}"
-        security_groups: ["{{ security_group }}"]
+        security_groups: ["{{ security_group_id }}"]
         network:
           subnet_id: "{{ subnet_id }}"
           assign_public_ip: yes
