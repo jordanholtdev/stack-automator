@@ -1,20 +1,53 @@
 ---
 - name: Launch EC2 instances
   hosts: localhost
-  gather_facts: no
+  gather_facts: false
   tasks:
+    - name: Debug key_name
+      debug:
+        msg: "key_name: {{ key_name }}"
+
+    - name: Debug instance_type
+      debug:
+        msg: "instance_type: {{ instance_type }}"
+
+    - name: Debug ami_id
+      debug:
+        msg: "ami_id: {{ ami_id }}"
+
+    - name: Debug region
+      debug:
+        msg: "region: {{ region }}"
+
+    - name: Get CloudFormation stack outputs
+      amazon.aws.cloudformation_facts:
+        stack_name: controlNodeTesting
+      register: cfn_outputs
+
+    - name: Capture Security Group and Subnet IDs
+      set_fact:
+        security_group_id: "{{ cfn_outputs.stack_outputs | selectattr('output_key', 'equalto', 'WebServerSecurityGroup') | map(attribute='output_value') | first }}"
+        subnet_id: "{{ cfn_outputs.stack_outputs | selectattr('output_key', 'equalto', 'PublicSubnet1Id') | map(attribute='output_value') | first }}"
+
+    - name: Debug - Show retrieved outputs
+      debug:
+      msg: 
+        - "Web server security group ID: {{ security_group_id }}"
+        - "Public Subnet ID: {{ subnet_id }}"
+
     - name: Launch a new EC2 instance
-      ec2:
+      amazon.aws.ec2_instance:
+        name: "test-instance"
         key_name: "{{ key_name }}"
         instance_type: "{{ instance_type }}"
-        image: "{{ ami_id }}"
+        image_id: "{{ ami_id }}"
         wait: yes
         region: "{{ region }}"
-        group: "{{ security_group }}"
-        vpc_subnet_id: "{{ subnet_id }}"
-        assign_public_ip: yes
+        security_groups: ["{{ security_group_id }}"]
+        network:
+          subnet_id: "{{ subnet_id }}"
+          assign_public_ip: yes
         count: 1
-      register: ec2
 
     - name: Add new instance to host group
       add_host:
@@ -31,9 +64,15 @@
         state: started
       with_items: "{{ ec2.instances }}"
 
+    - name: Save instance IDs to file
+      local_action:
+        module: copy
+        content: "{{ ec2.instances | map(attribute='id') | join('\n') }}"
+        dest: /home/ec2-user/ansible-repo/ansible/instance_ids.txt
+
 - name: Configure launched instances
   hosts: launched
-  become: yes
+  become: true
   tasks:
     - name: Install Apache
       yum:
