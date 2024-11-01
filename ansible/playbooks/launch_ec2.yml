@@ -1,78 +1,108 @@
----
 - name: Launch EC2 instances
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Ensure the /var/ansible directory exists and is writable
+      become: true
+      file:
+        path: /var/ansible
+        state: directory
+        mode: '0755'
+        owner: ec2-user
+        group: ec2-user
+
     - name: Debug key_name
       debug:
-        msg: "key_name: {{ key_name }}"
+        msg: 'key_name: {{ key_name }}'
 
     - name: Debug instance_type
       debug:
-        msg: "instance_type: {{ instance_type }}"
+        msg: 'instance_type: {{ instance_type }}'
 
     - name: Debug ami_id
       debug:
-        msg: "ami_id: {{ ami_id }}"
+        msg: 'ami_id: {{ ami_id }}'
 
     - name: Debug region
       debug:
-        msg: "region: {{ region }}"
+        msg: 'region: {{ region }}'
 
     - name: Get CloudFormation stack outputs
-      amazon.aws.cloudformation_facts:
+      amazon.aws.cloudformation_info:
+        region: '{{ region }}'
         stack_name: controlNodeTesting
       register: cfn_outputs
+    
+    - name: Debug - Show CloudFormation outputs
+      debug:
+        var: cfn_outputs
 
     - name: Capture Security Group and Subnet IDs
       set_fact:
-        security_group_id: "{{ cfn_outputs.stack_outputs | selectattr('output_key', 'equalto', 'WebServerSecurityGroup') | map(attribute='output_value') | first }}"
-        subnet_id: "{{ cfn_outputs.stack_outputs | selectattr('output_key', 'equalto', 'PublicSubnet1Id') | map(attribute='output_value') | first }}"
+        security_group_id: '{{ cfn_outputs.cloudformation.controlNodeTesting.stack_outputs.WebServerSecurityGroup }}'
+        subnet_id: '{{ cfn_outputs.cloudformation.controlNodeTesting.stack_outputs.PublicSubnet1Id }}'
 
     - name: Debug - Show retrieved outputs
+      debug: 
+        msg:
+          - 'Web server security group ID: {{ security_group_id }}'
+          - 'Public Subnet ID: {{ subnet_id }}'
+    
+    - name: Debug before launching EC2 instance
       debug:
-      msg: 
-        - "Web server security group ID: {{ security_group_id }}"
-        - "Public Subnet ID: {{ subnet_id }}"
+        msg:
+          - 'key_name: {{ key_name }}'
+          - 'instance_type: {{ instance_type }}'
+          - 'ami_id: {{ ami_id }}'
+          - 'region: {{ region }}'
+          - 'security_group_id: {{ security_group_id }}'
+          - 'subnet_id: {{ subnet_id }}'
 
     - name: Launch a new EC2 instance
       amazon.aws.ec2_instance:
-        name: "test-instance"
-        key_name: "{{ key_name }}"
-        instance_type: "{{ instance_type }}"
-        image_id: "{{ ami_id }}"
-        wait: yes
-        region: "{{ region }}"
-        security_groups: ["{{ security_group_id }}"]
+        name: web-server-test-instance
+        key_name: '{{ key_name }}'
+        instance_type: '{{ instance_type }}'
+        vpc_subnet_id: '{{ subnet_id }}'
+        image_id: '{{ ami_id }}'
+        region: '{{ region }}'
         network:
-          subnet_id: "{{ subnet_id }}"
-          assign_public_ip: yes
+          assign_public_ip: true
+        security_group: '{{ security_group_id }}'
         count: 1
+        tags:
+          Environment: Testing  
+      register: ec2
 
     - name: Add new instance to host group
       add_host:
-        hostname: "{{ item.public_ip }}"
+        hostname: '{{ item.network_interfaces[0].association.public_ip }}'
         groupname: launched
-      with_items: "{{ ec2.instances }}"
+      with_items: '{{ ec2.instances }}'
 
     - name: Wait for SSH to come up
       wait_for:
-        host: "{{ item.public_ip }}"
+        host: '{{ item.network_interfaces[0].association.public_ip }}'
         port: 22
         delay: 60
         timeout: 320
         state: started
-      with_items: "{{ ec2.instances }}"
+      with_items: '{{ ec2.instances }}'
 
     - name: Save instance IDs to file
+      become: true
       local_action:
         module: copy
-        content: "{{ ec2.instances | map(attribute='id') | join('\n') }}"
-        dest: /home/ec2-user/ansible-repo/ansible/instance_ids.txt
+        content: |-
+          {{ ec2.instances | map(attribute='instance_id') | join('
+          ') }}
+        dest: /var/ansible/instance_ids.txt
 
 - name: Configure launched instances
   hosts: launched
   become: true
+  vars:
+    ansible_ssh_private_key_file: /home/ec2-user/stack-automator-project.pem
   tasks:
     - name: Install Apache
       yum:
@@ -83,4 +113,4 @@
       service:
         name: httpd
         state: started
-        enabled: yes
+        enabled: 'yes'
