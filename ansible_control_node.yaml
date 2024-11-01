@@ -185,6 +185,9 @@ Resources:
                   - ec2:DescribeSecurityGroups
                   - ec2:DescribeSubnets
                   - ec2:DescribeVpcs
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeInstanceAttribute
+                  - cloudformation:DescribeStacks
                 Resource: "*"
 
   AnsibleControlNodeInstanceProfile:
@@ -286,6 +289,10 @@ Resources:
         - IpProtocol: tcp
           FromPort: "80"
           ToPort: "80"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: "22"
+          ToPort: "22"
           CidrIp: "0.0.0.0/0"
       SecurityGroupEgress:
         - IpProtocol: -1
