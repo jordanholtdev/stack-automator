@@ -21,7 +21,7 @@
 
     - name: Get CloudFormation stack outputs
       amazon.aws.cloudformation_facts:
-        stack_name: MyStack
+        stack_name: controlNodeTesting
       register: cfn_outputs
 
     - name: Capture Security Group and Subnet IDs
