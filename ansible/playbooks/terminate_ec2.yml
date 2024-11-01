@@ -1,0 +1,11 @@
+---
+- name: Terminate EC2 instances
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Terminate EC2 instances
+      ec2:
+        instance_ids: "{{ instance_ids }}"
+        state: absent
+        region: "{{ region }}"
+        wait: yes
